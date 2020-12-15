@@ -18,7 +18,7 @@ jobs:
         with:
           spec_path: "packaging/convert2rhel.spec"
 
-       - name: Upload EL6 RPM as release asset
+      - name: Upload EL6 RPM as release asset
         id: upload_release_asset_el6
         uses: actions/upload-release-asset@v1
         env:
