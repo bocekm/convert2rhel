@@ -14,7 +14,7 @@ jobs:
 
       - name: Build RPM package for EL6
         id: rpm_build_el6
-        uses: redwain/rpmbuild@el6
+        uses: bocekm/rpmbuild@el6
         with:
           spec_path: "packaging/convert2rhel.spec"
 
@@ -31,7 +31,7 @@ jobs:
 
       - name: Build RPM package for EL7
         id: rpm_build_el7
-        uses: redwain/rpmbuild@el7
+        uses: bocekm/rpmbuild@el7
         with:
           spec_path: "packaging/convert2rhel.spec"
 
@@ -48,7 +48,7 @@ jobs:
 
       - name: Build RPM package for EL8
         id: rpm_build_el8
-        uses: redwain/rpmbuild@centos8
+        uses: bocekm/rpmbuild@centos8
         with:
           spec_path: "packaging/convert2rhel.spec"
         
