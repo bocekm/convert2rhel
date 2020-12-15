@@ -20,7 +20,6 @@ try:
 except ImportError:
     import unittest
 
-from convert2rhel import cert
 from convert2rhel import pkghandler
 from convert2rhel import utils
 from convert2rhel import logger
@@ -30,11 +29,7 @@ class TestOther(unittest.TestCase):
 
     def test_correct_constants(self):
         # Prevents unintentional change of constants
-        self.assertEqual(utils.tmp_dir, "/tmp/convert2rhel/")
-        self.assertEqual(utils.data_dir, "/usr/share/convert2rhel/")
-        self.assertEqual(cert._redhat_release_cert_dir,
-                         "/etc/pki/product-default/")
-        self.assertEqual(cert._subscription_manager_cert_dir,
-                         "/etc/pki/product/")
+        self.assertEqual(utils.TMP_DIR, "/var/lib/convert2rhel/")
+        self.assertEqual(utils.DATA_DIR, "/usr/share/convert2rhel/")
         self.assertEqual(pkghandler.MAX_YUM_CMD_CALLS, 2)
         self.assertEqual(logger.LOG_DIR, "/var/log/convert2rhel")

@@ -19,7 +19,6 @@ import logging
 import os
 import sys
 
-from convert2rhel import cert
 from convert2rhel import logger
 from convert2rhel import pkghandler
 from convert2rhel import redhatrelease
@@ -31,7 +30,7 @@ from convert2rhel import toolopts
 from convert2rhel import utils
 
 
-class ConversionPhase:
+class ConversionPhase(object):
     INIT = 0
     POST_CLI = 1
     # PONR means Point Of No Return
@@ -41,6 +40,10 @@ class ConversionPhase:
 
 def main():
     """Perform all steps for the entire conversion process."""
+
+    # the tool will not run if not executed under the root user
+    utils.require_root()
+
     process_phase = ConversionPhase.INIT
     # initialize logging
     logger.initialize_logger("convert2rhel.log")
@@ -52,9 +55,6 @@ def main():
         toolopts.CLI()
 
         process_phase = ConversionPhase.POST_CLI
-
-        # the tool will not run if not executed under the root user
-        utils.require_root()
 
         # license agreement
         loggerinst.task("Prepare: End user license agreement")
@@ -71,6 +71,9 @@ def main():
         redhatrelease.system_release_file.backup()
         redhatrelease.yum_conf.backup()
 
+        loggerinst.task("Prepare: Clear YUM/DNF version locks")
+        pkghandler.clear_versionlock()
+
         # begin conversion process
         process_phase = ConversionPhase.PRE_PONR_CHANGES
         pre_ponr_conversion()
@@ -85,6 +88,9 @@ def main():
         process_phase = ConversionPhase.POST_PONR_CHANGES
         post_ponr_conversion()
 
+        loggerinst.task("Final: rpm files modified by the conversion")
+        systeminfo.system_info.modified_rpm_files_diff()
+
         # recommend non-interactive command
         loggerinst.task("Final: Non-interactive mode")
         toolopts.print_non_interactive_opts()
@@ -92,30 +98,28 @@ def main():
         # restart system if required
         utils.restart_system()
 
-    except:
-        traceback_str = utils.get_traceback_str()
-        if toolopts.tool_opts.debug:
-            # Print the traceback to the user when debug option used
-            loggerinst.debug(traceback_str)
-        else:
-            # Print the traceback to the log file in any way
-            loggerinst.file(traceback_str)
+    except (Exception, SystemExit, KeyboardInterrupt) as err:
+        # Catching the three exception types separately due to python 2.4
+        # (RHEL 5) - 2.7 (RHEL 7) compatibility.
 
-        print("\n")
-        if process_phase == ConversionPhase.POST_CLI:
-            print("No changes were made to the system.")
+        utils.log_traceback(toolopts.tool_opts.debug)
+        no_changes_msg = "No changes were made to the system."
+
+        if is_help_msg_exit(process_phase, err):
+            return 0
+        elif process_phase == ConversionPhase.INIT:
+            print(no_changes_msg)
+        elif process_phase == ConversionPhase.POST_CLI:
+            loggerinst.info(no_changes_msg)
         elif process_phase == ConversionPhase.PRE_PONR_CHANGES:
             rollback_changes()
         elif process_phase == ConversionPhase.POST_PONR_CHANGES:
-            """
-            After the process of subscription is done and the mass update of
-            packages is started convert2rhel will not be able to guarantee a
-            system rollback without user intervation. If a proper rollback
-            solution is necessary it will need to be future implemented here
-            or with the use of other backup tools.
-            """
-            print("Conversion process interrupted and manual user intervation"
-                  " will be necessary.")
+            # After the process of subscription is done and the mass update of
+            # packages is started convert2rhel will not be able to guarantee a
+            # system rollback without user intervention. If a proper rollback
+            # solution is necessary it will need to be future implemented here
+            # or with the use of other backup tools.
+            loggerinst.warning("Conversion process interrupted and manual user intervention will be necessary.")
 
         return 1
 
@@ -129,7 +133,7 @@ def user_to_accept_eula():
     loggerinst = logging.getLogger(__name__)
 
     eula_filename = "GLOBAL_EULA_RHEL"
-    eula_filepath = os.path.join(utils.data_dir, eula_filename)
+    eula_filepath = os.path.join(utils.DATA_DIR, eula_filename)
     eula_text = utils.get_file_content(eula_filepath)
     if eula_text:
         loggerinst.info(eula_text)
@@ -144,9 +148,9 @@ def pre_ponr_conversion():
     """Perform steps and checks to guarantee system is ready for conversion."""
     loggerinst = logging.getLogger(__name__)
 
-    # remove blacklisted packages
-    loggerinst.task("Convert: Remove blacklisted packages")
-    pkghandler.remove_blacklisted_pkgs()
+    # remove excluded packages
+    loggerinst.task("Convert: Remove excluded packages")
+    pkghandler.remove_excluded_pkgs()
 
     # install redhat release package
     loggerinst.task("Convert: Install Red Hat release package")
@@ -155,29 +159,24 @@ def pre_ponr_conversion():
     loggerinst.task("Convert: Patch yum configuration file")
     redhatrelease.YumConf().patch()
 
-    if systeminfo.system_info.version == "5":
-        cert.copy_cert_for_rhel_5()
-
     # package analysis
-    loggerinst.task("Convert: Package analysis")
-    repos_needed = repo.package_analysis()
-
-    if toolopts.tool_opts.disable_submgr:
-        loggerinst.task("Convert: Check required repos")
-        repo.check_needed_repos_availability(repos_needed)
-    else:
+    loggerinst.task("Convert: List third-party packages")
+    pkghandler.list_third_party_pkgs()
+    if not toolopts.tool_opts.disable_submgr:
         loggerinst.task("Convert: Subscription Manager - Install")
         subscription.install_subscription_manager()
         loggerinst.task("Convert: Subscription Manager - Subscribe system")
         subscription.subscribe_system()
-        loggerinst.task("Convert: Subscription Manager - Check required repos")
-        repo.check_needed_repos_availability(repos_needed)
-        loggerinst.task("Convert: Subscription Manager - Disable all repos")
+        loggerinst.task("Convert: Get RHEL repository IDs")
+        rhel_repoids = repo.get_rhel_repoids()
+        loggerinst.task("Convert: Subscription Manager - Check required repositories")
+        subscription.check_needed_repos_availability(rhel_repoids)
+        loggerinst.task("Convert: Subscription Manager - Disable all repositories")
         subscription.disable_repos()
-        loggerinst.task("Convert: Subscription Manager - Enable needed repos")
-        subscription.enable_repos(repos_needed)
+        loggerinst.task("Convert: Subscription Manager - Enable RHEL repositories")
+        subscription.enable_repos(rhel_repoids)
         # TODO: Replace renaming .repo files by using --enable for yum command
-        loggerinst.task("Convert: Subscription Manager - Rename repos")
+        loggerinst.task("Convert: Subscription Manager - Rename repositories")
         subscription.rename_repo_files()
 
 
@@ -185,6 +184,8 @@ def post_ponr_conversion():
     """Perform main steps for system conversion."""
     loggerinst = logging.getLogger(__name__)
 
+    loggerinst.task("Convert: Import Red Hat GPG keys")
+    pkghandler.install_gpg_keys()
     loggerinst.task("Convert: Prepare kernel")
     pkghandler.preserve_only_rhel_kernel()
     loggerinst.task("Convert: Replace packages")
@@ -194,15 +195,27 @@ def post_ponr_conversion():
     return
 
 
+def is_help_msg_exit(process_phase, err):
+    """After printing the help message, optparse within the toolopts.CLI()
+    call terminates the process with sys.exit(0).
+    """
+    if process_phase == ConversionPhase.INIT and \
+            isinstance(err, SystemExit) and err.args[0] == 0:
+        return True
+    return False
+
+
 def rollback_changes():
     """Perform a rollback of changes made during conversion."""
     loggerinst = logging.getLogger(__name__)
 
     loggerinst.warn("Abnormal exit! Performing rollback ...")
+    subscription.rollback()
     utils.changed_pkgs_control.restore_pkgs()
     redhatrelease.system_release_file.restore()
     redhatrelease.yum_conf.restore()
-    subscription.rollback_renamed_repo_files()
+    pkghandler.versionlock_file.restore()
+
     return
 
 

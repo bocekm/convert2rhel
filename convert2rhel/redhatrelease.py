@@ -22,6 +22,7 @@ from re import sub
 
 from convert2rhel import utils
 from convert2rhel.toolopts import tool_opts
+from convert2rhel.systeminfo import system_info
 
 
 def install_release_pkg():
@@ -30,7 +31,7 @@ def install_release_pkg():
     loggerinst.info("Installing %s package" % get_release_pkg_name())
 
     system_release_file.remove()
-    pkg_path = os.path.join(utils.data_dir, "redhat-release",
+    pkg_path = os.path.join(utils.DATA_DIR, "redhat-release",
                             tool_opts.variant, "redhat-release-*")
 
     success = utils.install_pkgs(glob.glob(pkg_path))
@@ -51,31 +52,24 @@ def install_release_pkg():
 
 
 def get_release_pkg_name():
-    """Starting with RHEL 6 the release package changed its name from
-    redhat-release to redhat-release-<lowercase variant>, e.g.
+    """For RHEL 6 and 7 the release package name follows this schema: redhat-release-<lowercase variant>, e.g.
     redhat-release-server.
+
+    For RHEL 8, the name is just redhat-release.
     """
-    from convert2rhel.systeminfo import system_info
-    if int(system_info.version) >= 6:
-        release_pkg_name = "redhat-release-" + tool_opts.variant.lower()
-    else:
-        release_pkg_name = "redhat-release"
-    return release_pkg_name
+    if system_info.version in ["6", "7"]:
+        return "redhat-release-" + tool_opts.variant.lower()
+    elif system_info.version == "8":
+        return "redhat-release"
 
 
 def get_system_release_filepath():
-    """Return name of the file containing name of the operating system and its
-    version.
-    """
+    """Return path of the file containing the OS name and version."""
+    release_filepath = "/etc/system-release"  # RHEL 6/7/8 based OSes
+    if os.path.isfile(release_filepath):
+        return release_filepath
     loggerinst = logging.getLogger(__name__)
-    possible_release_filenames = ["system-release",  # RHEL 6/7 based OSes
-                                  "oracle-release",  # Oracle Linux 5
-                                  "redhat-release"]  # CentOS 5
-    for release_file in possible_release_filenames:
-        if os.path.isfile("/etc/%s" % release_file):
-            return "/etc/%s" % release_file
-    loggerinst.critical("Error: Unable to find any file containing name of the"
-                        " OS and its version, e.g. /etc/system-release")
+    loggerinst.critical("Error: Unable to find the /etc/system-release file containing the OS name and version")
 
 
 def get_system_release_content():
@@ -86,7 +80,7 @@ def get_system_release_content():
     filepath = get_system_release_filepath()
     try:
         return utils.get_file_content(filepath)
-    except EnvironmentError, err:
+    except EnvironmentError as err:
         loggerinst.critical("%s\n%s file is essential for running this tool."
                             % (err, filepath))
 
@@ -133,5 +127,5 @@ class YumConf(object):
 
 
 # Code to be executed upon module import
-system_release_file = utils.RestorableFile(get_system_release_filepath())
-yum_conf = utils.RestorableFile(YumConf.get_yum_conf_filepath())
+system_release_file = utils.RestorableFile(get_system_release_filepath())  # pylint: disable=C0103
+yum_conf = utils.RestorableFile(YumConf.get_yum_conf_filepath())  # pylint: disable=C0103
