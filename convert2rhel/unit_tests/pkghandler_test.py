@@ -244,8 +244,8 @@ class TestPkgHandler(unit_tests.ExtendedTestCase):
 
     @unit_tests.mock(pkghandler, "call_yum_cmd", CallYumCmdMocked())
     @unit_tests.mock(pkghandler, "get_installed_pkgs_by_fingerprint", lambda _: ["pkg"])
-    @unit_tests.mock(pkghandler, "resolve_dep_errors", lambda output, __: output)
-    @unit_tests.mock(pkghandler, "get_problematic_pkgs", lambda pkg, _: {"errors": pkg})
+    @unit_tests.mock(pkghandler, "resolve_dep_errors", lambda output: output)
+    @unit_tests.mock(pkghandler, "get_problematic_pkgs", lambda pkg: {"errors": pkg})
     @unit_tests.mock(utils, "remove_pkgs", RemovePkgsMocked())
     def test_call_yum_cmd_w_downgrades_remove_problematic_pkgs(self):
         pkghandler.call_yum_cmd.return_code = 1
@@ -257,22 +257,22 @@ class TestPkgHandler(unit_tests.ExtendedTestCase):
         self.assertEqual(utils.remove_pkgs.critical, False)
 
     def test_get_problematic_pkgs(self):
-        error_pkgs = pkghandler.get_problematic_pkgs("", [])
+        error_pkgs = pkghandler.get_problematic_pkgs("", set())
         self.assertEqual(error_pkgs, {
-            "all": [],
-            "protected": [],
-            "errors": [],
-            "multilib": [],
-            "required": [],
+            "all": set(),
+            "protected": set(),
+            "errors": set(),
+            "multilib": set(),
+            "required": set(),
         })
 
-        error_pkgs = pkghandler.get_problematic_pkgs(YUM_PROTECTED_ERROR, [])
+        error_pkgs = pkghandler.get_problematic_pkgs(YUM_PROTECTED_ERROR, set())
         self.assertIn("systemd", error_pkgs['all'])
         self.assertIn("systemd", error_pkgs['protected'])
         self.assertIn("yum", error_pkgs['all'])
         self.assertIn("yum", error_pkgs['protected'])
 
-        error_pkgs = pkghandler.get_problematic_pkgs(YUM_REQUIRES_ERROR, [])
+        error_pkgs = pkghandler.get_problematic_pkgs(YUM_REQUIRES_ERROR, set())
         self.assertIn("libreport-anaconda", error_pkgs['all'])
         self.assertIn("libreport-anaconda", error_pkgs['errors'])
         self.assertIn("abrt-cli", error_pkgs['all'])
@@ -280,7 +280,7 @@ class TestPkgHandler(unit_tests.ExtendedTestCase):
         self.assertIn("libreport-plugin-rhtsupport", error_pkgs['all'])
         self.assertIn("libreport-plugin-rhtsupport", error_pkgs['required'])
 
-        error_pkgs = pkghandler.get_problematic_pkgs(YUM_MULTILIB_ERROR, [])
+        error_pkgs = pkghandler.get_problematic_pkgs(YUM_MULTILIB_ERROR, set())
         self.assertIn("openldap", error_pkgs['all'])
         self.assertIn("openldap", error_pkgs['multilib'])
         self.assertIn("p11-kit", error_pkgs['all'])
@@ -290,7 +290,7 @@ class TestPkgHandler(unit_tests.ExtendedTestCase):
     def test_resolve_dep_errors_one_downgrade_fixes_the_error(self):
         pkghandler.call_yum_cmd.fail_once = True
 
-        pkghandler.resolve_dep_errors(YUM_PROTECTED_ERROR, [])
+        pkghandler.resolve_dep_errors(YUM_PROTECTED_ERROR, set())
 
         self.assertEqual(pkghandler.call_yum_cmd.called, 1)
 
@@ -299,7 +299,7 @@ class TestPkgHandler(unit_tests.ExtendedTestCase):
         pkghandler.call_yum_cmd.return_code = 1
         pkghandler.call_yum_cmd.return_string = YUM_MULTILIB_ERROR
 
-        pkghandler.resolve_dep_errors(YUM_PROTECTED_ERROR, [])
+        pkghandler.resolve_dep_errors(YUM_PROTECTED_ERROR, set())
 
         # Firts call of the resolve_dep_errors, pkgs from protected error
         # are detected, the second call pkgs from multilib error are detected,
@@ -313,7 +313,7 @@ class TestPkgHandler(unit_tests.ExtendedTestCase):
         # Even though resolve_dep_errors was called (meaning that the previous
         # yum call ended with non-zero status), the string returned by yum
         # does not hold information recognizable by get_problematic_pkgs
-        pkghandler.resolve_dep_errors("No info about problematic pkgs.", [])
+        pkghandler.resolve_dep_errors("No info about problematic pkgs.", set())
 
         self.assertEqual(pkghandler.call_yum_cmd.called, 0)
 
